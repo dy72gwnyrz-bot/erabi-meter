@@ -107,6 +107,22 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
 .rank-item.top .rank-bar i{ background:var(--gold); }
 .rank-pts{ text-align:right; font-variant-numeric:tabular-nums; color:var(--sub); font-size:12.5px; }
 .hidden{ display:none; }
+
+/* confidence level segmented control */
+.seg{ display:flex; gap:8px; flex-wrap:wrap; }
+.seg-opt{ position:relative; cursor:pointer; flex:1; min-width:88px; }
+.seg-opt input{ position:absolute; opacity:0; width:0; height:0; }
+.seg-opt span{ display:block; text-align:center; border:1.5px solid var(--line); border-radius:9px;
+  padding:9px 10px; font-size:13px; color:var(--sub); background:transparent;
+  transition:border-color .12s, color .12s, background-color .12s; }
+.seg-opt input:checked + span{ border-color:var(--accent); color:var(--accent-ink); background:var(--accent); }
+.seg-opt input:focus-visible + span{ outline:2px solid var(--gold); outline-offset:2px; }
+
+/* result tie styling */
+.rank-no.tie{ color:var(--sub); opacity:.55; }
+
+button:disabled{ opacity:.4; cursor:not-allowed; }
+
 @media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
 @media (max-width:380px){ .opts{ grid-template-columns:1fr; } .opt{ min-height:70px; padding:16px; } }
 </style>
@@ -143,6 +159,15 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
         </div>
       </div>
       <p class="hint" style="margin-top:12px">出題は自動でミックスされます: 2〜4択から「いちばん良い」を選ぶ回と、「これは無いな」を外す回。</p>
+      <div class="field">
+        <label>順位の確からしさ</label>
+        <div class="seg" id="confSeg" role="radiogroup" aria-label="順位の確からしさ">
+          <label class="seg-opt"><input type="radio" name="conf" value="1"><span>ざっくり</span></label>
+          <label class="seg-opt"><input type="radio" name="conf" value="1.6" checked><span>ふつう</span></label>
+          <label class="seg-opt"><input type="radio" name="conf" value="3"><span>しっかり</span></label>
+        </div>
+        <p class="hint" id="confDesc" style="margin-top:6px"></p>
+      </div>
       <div class="row">
         <button class="primary" id="startBtn">比較をはじめる</button>
         <button class="ghost" id="backHome1">もどる</button>
@@ -173,6 +198,7 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
     <ol class="rank-list" id="rankList"></ol>
     <div class="row">
       <button class="primary" id="againBtn">同じ候補でもう一度</button>
+      <button class="ghost" id="continueBtn">続けて精度を上げる</button>
       <button class="ghost" id="backHome2">ホームへ</button>
     </div>
   </section>
@@ -183,9 +209,26 @@ const $ = id => document.getElementById(id);
 const show = id => { for (const s of ['home','setup','duel','result']) $(s).classList.toggle('hidden', s!==id); };
 const LS_HIST = 'erabi_hist_v1', LS_CUR = 'erabi_cur_v1';
 const load = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
-const save = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+const save = (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){ console.warn('localStorageへの保存に失敗しました:', e); } };
 
-let S = null; // {title, items:[{name,r,g}], round, total}
+/* Fisher–Yates シャッフル(元配列は変更しない) */
+function shuffle(arr){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+let S = null; // {title, items:[{name,r,g}], round, total, confMult, answered}
+/* 旧フォーマットの中断データ(フィールド欠落)を読んでも壊れないようデフォルトで補う */
+function normalizeS(s){
+  if (!s) return s;
+  if (typeof s.confMult !== 'number') s.confMult = 1.6;
+  if (typeof s.answered !== 'number') s.answered = s.round || 0;
+  return s;
+}
 
 /* ---- Eloレーティング ----
    全員1500から開始。勝者は同時に見せた相手全員に「勝った」として更新。
@@ -203,7 +246,27 @@ function beat(w, l){
 const SAMPLE_ITEMS = ['京都','札幌','沖縄','金沢','台北','ソウル','バンコク','ハワイ','シンガポール','函館','屋久島','直島'];
 const itemList = $('itemList');
 const parseInput = () => [...new Set([...itemList.querySelectorAll('input')].map(i => i.value.trim()).filter(Boolean))];
-const roundsFor = n => Math.max(6, Math.ceil(n * 1.6));
+
+/* ---- 確度レベル(順位の確からしさ) ---- */
+const CONF_LEVELS = [
+  { mult: 1,   label: 'ざっくり', desc: 'はやい・上位の傾向がわかる' },
+  { mult: 1.6, label: 'ふつう',   desc: 'バランス' },
+  { mult: 3,   label: 'しっかり', desc: '問数は増えるが1位の信頼度が高い' },
+];
+let confMult = 1.6;
+const roundsFor = (n, mult = confMult) => Math.max(6, Math.ceil(n * mult));
+function updateConfDesc(){
+  const lvl = CONF_LEVELS.find(l => l.mult === confMult) || CONF_LEVELS[1];
+  $('confDesc').textContent = lvl.desc;
+}
+$('confSeg').querySelectorAll('input[name=conf]').forEach(inp => {
+  inp.addEventListener('change', () => {
+    confMult = parseFloat(inp.value);
+    updateConfDesc();
+    updateEstimate();
+  });
+});
+updateConfDesc();
 
 function makeRow(value){
   const row = document.createElement('div');
@@ -277,7 +340,8 @@ $('startBtn').onclick = () => {
   if (names.length < 2) { alert('候補を2つ以上入れてください'); return; }
   S = { title: $('title').value.trim() || '無題のランキング',
         items: names.map(name => ({ name, r: 1500, g: 0 })),
-        round: 0, total: roundsFor(names.length) };
+        round: 0, total: roundsFor(names.length), confMult, answered: 0 };
+  lastKey = '';
   show('duel'); nextRound();
 };
 
@@ -288,11 +352,25 @@ function pickRound(){
   const n = S.items.length;
   const size = Math.min(n, [2,3,3,4][Math.floor(Math.random()*4)]);
   mode = (size >= 3 && Math.random() < 0.3) ? 'worst' : 'best';
-  const pool = [...S.items].sort((a,b) => a.g - b.g || Math.random() - .5);
+  const pool = shuffle(S.items).sort((a,b) => a.g - b.g);
   const anchor = pool[0];
-  const rest = pool.slice(1).sort((a,b) =>
-    Math.abs(a.r - anchor.r) - Math.abs(b.r - anchor.r) || Math.random() - .5);
-  current = [anchor, ...rest.slice(0, size - 1)].sort(() => Math.random() - .5);
+  const rest = shuffle(pool.slice(1)).sort((a,b) =>
+    Math.abs(a.r - anchor.r) - Math.abs(b.r - anchor.r));
+  current = shuffle([anchor, ...rest.slice(0, size - 1)]);
+}
+
+/* 直前に表示した組み合わせを記録し、連続スキップで同じ顔ぶれが出続けないようにする */
+let lastKey = '';
+function pickRoundUnique(){
+  pickRound();
+  let key = current.map(c => c.name).slice().sort().join('|');
+  let tries = 0;
+  while (key === lastKey && tries < 10 && current.length < S.items.length){
+    pickRound();
+    key = current.map(c => c.name).slice().sort().join('|');
+    tries++;
+  }
+  lastKey = key;
 }
 
 function nextRound(){
@@ -303,10 +381,16 @@ function nextRound(){
 }
 
 /* 現在の S.round のまま出題・描画だけを行う(再開時にも使う) */
+function updateFinishBtn(){
+  const need = Math.min(S.total, S.items.length);
+  $('finishBtn').disabled = (S.answered || 0) < need;
+}
+
 function renderRound(){
   $('roundLabel').textContent = `${S.round} / ${S.total} 問 — ${S.title}`;
   $('progFill').style.width = ((S.round-1)/S.total*100) + '%';
-  pickRound();
+  pickRoundUnique();
+  updateFinishBtn();
   const worst = mode === 'worst';
   $('modePill').textContent = worst ? 'はずす' : 'えらぶ';
   $('modePill').className = 'mode-pill' + (worst ? ' worst' : '');
@@ -326,6 +410,7 @@ function renderRound(){
       if (mode === 'best') others.forEach(o => beat(it, o));
       else others.forEach(o => beat(o, it));
       current.forEach(c => c.g++);
+      S.answered = (S.answered || 0) + 1;
       nextRound();
     };
     box.appendChild(b);
@@ -342,10 +427,12 @@ $('noneBtn').onclick = () => {
     else beat(c, virtual);
   });
   current.forEach(c => c.g++);
+  S.answered = (S.answered || 0) + 1;
   nextRound();
 };
 
-$('skipBtn').onclick = () => nextRound();
+/* スキップ: 問数は消費せず、出題だけ引き直して再描画する */
+$('skipBtn').onclick = () => renderRound();
 $('finishBtn').onclick = finish;
 $('pauseBtn').onclick = () => { saveProgress(); renderHome(); };
 
@@ -353,9 +440,10 @@ function saveProgress(){ save(LS_CUR, S); }
 
 function finish(){
   localStorage.removeItem(LS_CUR);
-  const rec = { id: Date.now(), title: S.title, date: new Date().toISOString().slice(0,10),
-    rounds: S.round, items: S.items.map(i => ({ name: i.name, r: Math.round(i.r), g: i.g })) };
-  const hist = load(LS_HIST) || [];
+  const rec = { id: S.histId || Date.now(), title: S.title, date: new Date().toISOString().slice(0,10),
+    rounds: S.round, confMult: S.confMult,
+    items: S.items.map(i => ({ name: i.name, r: Math.round(i.r), g: i.g })) };
+  const hist = (load(LS_HIST) || []).filter(r => r.id !== rec.id);
   hist.unshift(rec);
   save(LS_HIST, hist.slice(0, 50));
   renderResult(rec, true);
@@ -365,31 +453,59 @@ function finish(){
    「その結果内の平均的な候補に勝つ確率」なので、平均がちょうど50になる。 */
 const toScore = (r, avg) => Math.round(100 / (1 + 10 ** ((avg - r) / 400)));
 
+/* 表示スコアの差が3以内で隣接する候補は同グループ(同順位)とみなす。
+   グループ内では最初の候補の順位番号を共有する(競技順位: 1,1,3,4 のような形)。 */
+function groupRanks(scores){
+  const ranks = [];
+  let groupStart = 0;
+  scores.forEach((sc, i) => {
+    if (i > 0 && Math.abs(sc - scores[i-1]) > 3) groupStart = i;
+    ranks.push(groupStart + 1);
+  });
+  return ranks;
+}
+
 function renderResult(rec, fresh){
   $('resultTitle').textContent = rec.title;
-  $('resultMeta').textContent = `${rec.date} · ${rec.rounds} 問の回答から算出 · スコアは平均50の強さ指標`;
+  $('resultMeta').textContent = `${rec.date} · ${rec.rounds} 問の回答から算出 · スコアは平均50の強さ指標 · スコア差3以内は同順位扱い`;
   const ranked = [...rec.items].sort((a,b) => b.r - a.r);
   const avg = rec.items.reduce((s, i) => s + i.r, 0) / rec.items.length;
   const max = ranked[0].r, min = ranked[ranked.length-1].r, span = Math.max(1, max - min);
+  const scores = ranked.map(it => toScore(it.r, avg));
+  const ranks = groupRanks(scores);
   const list = $('rankList');
   list.innerHTML = '';
   ranked.forEach((it, i) => {
+    const rank = ranks[i];
+    const tie = i > 0 && ranks[i] === ranks[i-1];
     const li = document.createElement('li');
-    li.className = 'rank-item' + (i === 0 ? ' top' : '');
-    li.innerHTML = `<div class="rank-no">${i+1}</div>
+    li.className = 'rank-item' + (rank === 1 ? ' top' : '');
+    li.innerHTML = `<div class="rank-no${tie ? ' tie' : ''}"></div>
       <div><div class="rank-name"></div><div class="rank-bar"><i style="width:${10 + (it.r-min)/span*90}%"></i></div></div>
-      <div class="rank-pts">${toScore(it.r, avg)}</div>`;
+      <div class="rank-pts">${scores[i]}</div>`;
+    li.querySelector('.rank-no').textContent = (tie ? '=' : '') + rank;
     li.querySelector('.rank-name').textContent = it.name;
     list.appendChild(li);
   });
   $('againBtn').classList.toggle('hidden', !fresh);
+  $('continueBtn').classList.toggle('hidden', !fresh);
   lastRec = rec;
   show('result');
 }
 let lastRec = null;
 $('againBtn').onclick = () => {
+  const mult = (typeof lastRec.confMult === 'number') ? lastRec.confMult : confMult;
   S = { title: lastRec.title, items: lastRec.items.map(i => ({ name: i.name, r: 1500, g: 0 })),
-        round: 0, total: roundsFor(lastRec.items.length) };
+        round: 0, total: roundsFor(lastRec.items.length, mult), confMult: mult, answered: 0 };
+  lastKey = '';
+  show('duel'); nextRound();
+};
+/* 続けて精度を上げる: 現在のレート・出場回数gを引き継いだまま問数を追加し、同じ履歴レコードを更新する */
+$('continueBtn').onclick = () => {
+  const addRounds = Math.max(4, Math.ceil(S.items.length * 0.8));
+  S.total += addRounds;
+  S.histId = lastRec.id;
+  lastKey = '';
   show('duel'); nextRound();
 };
 
@@ -401,7 +517,7 @@ function renderHome(){
     li.className = 'card resume'; li.style.marginTop = '12px'; li.style.cursor = 'pointer';
     li.innerHTML = `<span class="badge gold">中断中</span> <b></b> <span class="hint">— ${cur.round}/${cur.total} 問まで回答済み。タップで再開</span>`;
     li.querySelector('b').textContent = cur.title;
-    li.onclick = () => { S = cur; show('duel'); renderRound(); };
+    li.onclick = () => { S = normalizeS(cur); lastKey = ''; show('duel'); renderRound(); };
     $('resumeBox').appendChild(li);
   }
   const hist = load(LS_HIST) || [];

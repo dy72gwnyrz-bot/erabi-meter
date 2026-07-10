@@ -1,5 +1,5 @@
-// えらびメーター service worker — simple cache-first offline support.
-const CACHE_VERSION = 'erabi-meter-v2';
+// えらびメーター service worker — navigation is network-first, other assets are cache-first.
+const CACHE_VERSION = 'erabi-meter-v3';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -29,6 +29,28 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  const isNavigation = event.request.mode === 'navigate' ||
+    event.request.url.endsWith('/index.html') ||
+    event.request.url.endsWith('/erabi-meter/') ||
+    event.request.url.endsWith('/erabi-meter');
+
+  if (isNavigation) {
+    // network-first: 最新のHTMLを優先し、失敗時のみキャッシュにフォールバックする
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // その他アセットは現行どおり cache-first
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
