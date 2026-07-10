@@ -1,5 +1,5 @@
 // えらびメーター service worker — simple cache-first offline support.
-const CACHE_VERSION = 'erabi-meter-v1';
+const CACHE_VERSION = 'erabi-meter-v2';
 const PRECACHE_URLS = [
   './',
   './index.html',

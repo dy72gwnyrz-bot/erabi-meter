@@ -44,8 +44,11 @@ h2{ font-size:18px; margin:0 0 10px; }
 
 .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; }
 input[type=text], textarea{ width:100%; background:var(--bg); color:var(--ink);
-  border:1px solid var(--line); border-radius:8px; padding:12px; font:inherit; font-size:14px; }
-textarea{ height:180px; resize:vertical; }
+  border:1px solid var(--line); border-radius:8px; padding:12px; font:inherit; font-size:16px; }
+.item-list{ display:flex; flex-direction:column; gap:8px; }
+.item-row{ display:flex; gap:8px; align-items:center; }
+.item-row input{ flex:1; min-width:0; }
+.item-del{ background:none; border:none; color:var(--sub); font-size:16px; cursor:pointer; padding:8px; flex:none; }
 .row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:16px; }
 .hint{ color:var(--sub); font-size:12.5px; }
 button.primary{ background:var(--accent); color:var(--accent-ink); border:none; border-radius:9px;
@@ -87,6 +90,8 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
 .opt:active{ border-color:var(--accent); }
 .duel-worst .opt:active{ border-color:var(--warn); }
 .opt-label{ font-size:17px; line-height:1.5; text-wrap:balance; }
+.opts .opt:nth-child(odd):last-child{ grid-column:1 / -1; }
+.none-btn{ display:block; width:100%; margin-top:10px; }
 .skip{ display:flex; gap:10px; justify-content:center; margin-top:18px; flex-wrap:wrap; }
 
 /* results */
@@ -111,7 +116,7 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
 
   <!-- ⓪ home -->
   <section id="home">
-    <p class="eyebrow">Prototype v2</p>
+    <p class="eyebrow">β</p>
     <h1>えらびメーター</h1>
     <p class="tagline">たくさんの候補を、少ない比較で順位づけする。</p>
     <button class="primary" id="newBtn" style="width:100%">新しいランキングをつくる</button>
@@ -127,22 +132,15 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
     <div class="card">
       <div class="field">
         <label for="title">なにを決める?</label>
-        <input type="text" id="title" placeholder="例: 次の旅行先" value="次の旅行先">
+        <input type="text" id="title" placeholder="例: 次の旅行先">
       </div>
       <div class="field">
-        <label for="input">候補(1行に1つ・5〜30個くらいが快適)</label>
-        <textarea id="input">京都
-札幌
-沖縄
-金沢
-台北
-ソウル
-バンコク
-ハワイ
-シンガポール
-函館
-屋久島
-直島</textarea>
+        <label>候補(1つずつ入力・5〜30個くらいが快適)</label>
+        <div class="item-list" id="itemList"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="ghost" id="addItemBtn" type="button">+ 候補を追加</button>
+          <button class="ghost" id="sampleBtn" type="button">サンプルを入れる</button>
+        </div>
       </div>
       <p class="hint" style="margin-top:12px">出題は自動でミックスされます: 2〜4択から「いちばん良い」を選ぶ回と、「これは無いな」を外す回。</p>
       <div class="row">
@@ -160,10 +158,11 @@ button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline
     <span class="mode-pill" id="modePill"></span>
     <p class="q-main" id="qMain"></p>
     <div class="opts" id="optsBox"></div>
+    <button class="ghost none-btn" id="noneBtn">どれもピンとこない</button>
     <div class="skip">
-      <button class="ghost" id="skipBtn">この組はスキップ</button>
-      <button class="ghost" id="finishBtn">打ち切って結果を見る</button>
-      <button class="ghost" id="pauseBtn">中断(あとで再開)</button>
+      <button class="ghost" id="skipBtn">スキップ</button>
+      <button class="ghost" id="finishBtn">結果を見る</button>
+      <button class="ghost" id="pauseBtn">中断</button>
     </div>
   </section>
 
@@ -200,10 +199,70 @@ function beat(w, l){
   l.r -= kl * (1 - e);
 }
 
-const parseInput = () => [...new Set($('input').value.split('\n').map(s=>s.trim()).filter(Boolean))];
+/* ---- 候補入力(1候補=1テキストボックス) ---- */
+const SAMPLE_ITEMS = ['京都','札幌','沖縄','金沢','台北','ソウル','バンコク','ハワイ','シンガポール','函館','屋久島','直島'];
+const itemList = $('itemList');
+const parseInput = () => [...new Set([...itemList.querySelectorAll('input')].map(i => i.value.trim()).filter(Boolean))];
 const roundsFor = n => Math.max(6, Math.ceil(n * 1.6));
 
-$('input').addEventListener('input', updateEstimate);
+function makeRow(value){
+  const row = document.createElement('div');
+  row.className = 'item-row';
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = value || '';
+  inp.placeholder = '候補を入力';
+  inp.addEventListener('input', onItemInput);
+  inp.addEventListener('paste', onItemPaste);
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'item-del';
+  del.textContent = '✕';
+  del.setAttribute('aria-label', 'この候補を削除');
+  del.onclick = () => {
+    row.remove();
+    if (!itemList.children.length) addRow();
+    updateEstimate();
+  };
+  row.append(inp, del);
+  return row;
+}
+function addRow(value){
+  const row = makeRow(value);
+  itemList.appendChild(row);
+  return row;
+}
+function resetRows(values){
+  itemList.innerHTML = '';
+  (values && values.length ? values : ['','','','','']).forEach(v => addRow(v));
+  updateEstimate();
+}
+function onItemInput(e){
+  const rows = itemList.children;
+  const last = rows[rows.length - 1];
+  if (last && last.querySelector('input') === e.target && e.target.value.trim()) addRow();
+  updateEstimate();
+}
+function onItemPaste(e){
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  if (!text || !/[\r\n]/.test(text)) return;
+  e.preventDefault();
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!lines.length) return;
+  const inp = e.target;
+  inp.value = lines[0];
+  let after = inp.closest('.item-row');
+  for (const line of lines.slice(1)){
+    const row = makeRow(line);
+    after.insertAdjacentElement('afterend', row);
+    after = row;
+  }
+  updateEstimate();
+}
+$('addItemBtn').onclick = () => { addRow().querySelector('input').focus(); };
+$('sampleBtn').onclick = () => resetRows(SAMPLE_ITEMS);
+resetRows();
+
 function updateEstimate(){
   const n = parseInput().length;
   $('estimate').textContent = n >= 2 ? `候補 ${n} 件 → 約 ${roundsFor(n)} 問` : '';
@@ -240,6 +299,11 @@ function nextRound(){
   if (S.round >= S.total) { finish(); return; }
   S.round++;
   saveProgress();
+  renderRound();
+}
+
+/* 現在の S.round のまま出題・描画だけを行う(再開時にも使う) */
+function renderRound(){
   $('roundLabel').textContent = `${S.round} / ${S.total} 問 — ${S.title}`;
   $('progFill').style.width = ((S.round-1)/S.total*100) + '%';
   pickRound();
@@ -249,6 +313,7 @@ function nextRound(){
   $('qMain').textContent = worst ? 'この中で「これは無いな」と思うのは?' : 'いま選ぶなら、どれ?';
   $('qMain').className = 'q-main' + (worst ? ' worst' : '');
   $('duel').classList.toggle('duel-worst', worst);
+  $('noneBtn').textContent = worst ? '外したいものはない' : 'どれもピンとこない';
   const box = $('optsBox');
   box.innerHTML = '';
   current.forEach(it => {
@@ -266,6 +331,20 @@ function nextRound(){
     box.appendChild(b);
   });
 }
+/* 「どれもピンとこない」: 表示中の候補を仮想の平均候補と対戦させる。
+   えらぶ回 → 各候補が平均候補に負けた扱い / はずす回 → 各候補が平均候補に勝った扱い。
+   仮想候補は使い捨て(レート変動は捨てる)。 */
+$('noneBtn').onclick = () => {
+  const avg = S.items.reduce((s, i) => s + i.r, 0) / S.items.length;
+  current.forEach(c => {
+    const virtual = { r: avg, g: 99 };
+    if (mode === 'best') beat(virtual, c);
+    else beat(c, virtual);
+  });
+  current.forEach(c => c.g++);
+  nextRound();
+};
+
 $('skipBtn').onclick = () => nextRound();
 $('finishBtn').onclick = finish;
 $('pauseBtn').onclick = () => { saveProgress(); renderHome(); };
@@ -282,10 +361,15 @@ function finish(){
   renderResult(rec, true);
 }
 
+/* 表示用スコア: 内部Eloレートはそのまま保存し、表示時だけ0〜100に変換する。
+   「その結果内の平均的な候補に勝つ確率」なので、平均がちょうど50になる。 */
+const toScore = (r, avg) => Math.round(100 / (1 + 10 ** ((avg - r) / 400)));
+
 function renderResult(rec, fresh){
   $('resultTitle').textContent = rec.title;
-  $('resultMeta').textContent = `${rec.date} · ${rec.rounds} 問 · Eloレーティング(1500基準)`;
+  $('resultMeta').textContent = `${rec.date} · ${rec.rounds} 問の回答から算出 · スコアは平均50の強さ指標`;
   const ranked = [...rec.items].sort((a,b) => b.r - a.r);
+  const avg = rec.items.reduce((s, i) => s + i.r, 0) / rec.items.length;
   const max = ranked[0].r, min = ranked[ranked.length-1].r, span = Math.max(1, max - min);
   const list = $('rankList');
   list.innerHTML = '';
@@ -294,7 +378,7 @@ function renderResult(rec, fresh){
     li.className = 'rank-item' + (i === 0 ? ' top' : '');
     li.innerHTML = `<div class="rank-no">${i+1}</div>
       <div><div class="rank-name"></div><div class="rank-bar"><i style="width:${10 + (it.r-min)/span*90}%"></i></div></div>
-      <div class="rank-pts">${it.r}</div>`;
+      <div class="rank-pts">${toScore(it.r, avg)}</div>`;
     li.querySelector('.rank-name').textContent = it.name;
     list.appendChild(li);
   });
@@ -317,7 +401,7 @@ function renderHome(){
     li.className = 'card resume'; li.style.marginTop = '12px'; li.style.cursor = 'pointer';
     li.innerHTML = `<span class="badge gold">中断中</span> <b></b> <span class="hint">— ${cur.round}/${cur.total} 問まで回答済み。タップで再開</span>`;
     li.querySelector('b').textContent = cur.title;
-    li.onclick = () => { S = cur; show('duel'); S.round--; nextRound(); };
+    li.onclick = () => { S = cur; show('duel'); renderRound(); };
     $('resumeBox').appendChild(li);
   }
   const hist = load(LS_HIST) || [];
