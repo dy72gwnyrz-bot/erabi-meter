@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>えらびメーター — 比較投票で順位づけ</title>
+<meta name="description" content="たくさんの候補を、少ない比較で順位づけするPWA「えらびメーター」。データは端末内(localStorage)のみに保存されます。">
+<meta name="theme-color" content="#F7F6F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#191C1F" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="えらび">
+<style>
+:root{
+  --bg:#F7F6F3; --panel:#FFFFFF; --ink:#22252B; --sub:#6B6E76; --line:#E3E1DB;
+  --accent:#2E6E62; --accent-ink:#FFFFFF; --accent-soft:#E4EFEC;
+  --gold:#C98A2D; --bar:#DDE8E5; --warn:#A8432F; --warn-soft:#F3E4DF;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#191C1F; --panel:#22262A; --ink:#E8E7E3; --sub:#9A9EA6; --line:#33383E;
+    --accent:#5CA898; --accent-ink:#10201C; --accent-soft:#26332F; --gold:#D9A557; --bar:#2C3634;
+    --warn:#D4735C; --warn-soft:#3A2B27; }
+}
+:root[data-theme="dark"]{ --bg:#191C1F; --panel:#22262A; --ink:#E8E7E3; --sub:#9A9EA6; --line:#33383E;
+  --accent:#5CA898; --accent-ink:#10201C; --accent-soft:#26332F; --gold:#D9A557; --bar:#2C3634;
+  --warn:#D4735C; --warn-soft:#3A2B27; }
+:root[data-theme="light"]{ --bg:#F7F6F3; --panel:#FFFFFF; --ink:#22252B; --sub:#6B6E76; --line:#E3E1DB;
+  --accent:#2E6E62; --accent-ink:#FFFFFF; --accent-soft:#E4EFEC; --gold:#C98A2D; --bar:#DDE8E5;
+  --warn:#A8432F; --warn-soft:#F3E4DF; }
+
+*{box-sizing:border-box}
+body{ margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Sans","Yu Gothic UI","Yu Gothic",Meiryo,sans-serif;
+  font-size:15px; line-height:1.7; -webkit-tap-highlight-color:transparent; }
+.wrap{ max-width:520px; margin:0 auto; padding:28px 16px 90px; }
+h1,h2,.opt-label{ font-family:"Hiragino Mincho ProN","Yu Mincho","Yu Mincho Light",serif; }
+h1{ font-size:24px; margin:0 0 2px; letter-spacing:.04em; text-wrap:balance; }
+.tagline{ color:var(--sub); font-size:12.5px; margin:0 0 24px; }
+h2{ font-size:18px; margin:0 0 10px; }
+.eyebrow{ font-size:10.5px; letter-spacing:.18em; color:var(--accent); text-transform:uppercase; margin:0 0 4px; }
+
+.card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px; }
+input[type=text], textarea{ width:100%; background:var(--bg); color:var(--ink);
+  border:1px solid var(--line); border-radius:8px; padding:12px; font:inherit; font-size:14px; }
+textarea{ height:180px; resize:vertical; }
+.row{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:16px; }
+.hint{ color:var(--sub); font-size:12.5px; }
+button.primary{ background:var(--accent); color:var(--accent-ink); border:none; border-radius:9px;
+  padding:12px 24px; font:inherit; font-size:15px; cursor:pointer; }
+button.primary:active{ filter:brightness(1.1); }
+button.ghost{ background:transparent; border:1px solid var(--line); color:var(--sub); border-radius:9px;
+  padding:9px 14px; font:inherit; font-size:13.5px; cursor:pointer; }
+button:focus-visible, .opt:focus-visible{ outline:2px solid var(--gold); outline-offset:2px; }
+.field{ margin-top:14px; }
+.field label{ display:block; font-size:12.5px; color:var(--sub); margin-bottom:5px; }
+
+/* home / history */
+.hist{ list-style:none; margin:12px 0 0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.hist li{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+  display:flex; align-items:center; gap:12px; cursor:pointer; }
+.hist .meta{ flex:1; min-width:0; }
+.hist .t{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hist .s{ color:var(--sub); font-size:12px; }
+.hist .del{ background:none; border:none; color:var(--sub); font-size:16px; cursor:pointer; padding:6px; }
+.resume{ border-color:var(--gold); }
+.badge{ display:inline-block; font-size:10.5px; letter-spacing:.08em; padding:2px 9px; border-radius:99px;
+  background:var(--accent-soft); color:var(--accent); }
+.badge.gold{ background:transparent; border:1px solid var(--gold); color:var(--gold); }
+
+/* duel */
+.progress{ height:5px; background:var(--bar); border-radius:3px; margin:16px 0 20px; overflow:hidden; }
+.progress i{ display:block; height:100%; background:var(--accent); border-radius:3px; transition:width .25s; }
+.q{ text-align:center; color:var(--sub); font-size:12.5px; margin:0 0 4px; }
+.q-main{ text-align:center; font-size:16px; margin:0 0 14px; }
+.q-main.worst{ color:var(--warn); }
+.mode-pill{ display:block; width:fit-content; margin:0 auto 10px; font-size:11px; letter-spacing:.1em;
+  padding:3px 12px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
+.mode-pill.worst{ background:var(--warn-soft); color:var(--warn); }
+.opts{ display:grid; gap:10px; grid-template-columns:1fr 1fr; }
+.opt{ position:relative; background:var(--panel); border:1.5px solid var(--line); border-radius:12px;
+  padding:24px 14px; cursor:pointer; text-align:center; font:inherit; color:var(--ink);
+  transition:border-color .12s; min-height:96px;
+  display:flex; align-items:center; justify-content:center; }
+.opt:active{ border-color:var(--accent); }
+.duel-worst .opt:active{ border-color:var(--warn); }
+.opt-label{ font-size:17px; line-height:1.5; text-wrap:balance; }
+.skip{ display:flex; gap:10px; justify-content:center; margin-top:18px; flex-wrap:wrap; }
+
+/* results */
+.rank-list{ list-style:none; margin:14px 0 0; padding:0; display:flex; flex-direction:column; gap:9px; }
+.rank-item{ display:grid; grid-template-columns:40px 1fr 62px; gap:10px; align-items:center;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:11px 14px; }
+.rank-no{ font-family:"Hiragino Mincho ProN","Yu Mincho",serif; font-size:19px; text-align:center;
+  color:var(--sub); font-variant-numeric:tabular-nums; }
+.rank-item.top .rank-no{ color:var(--gold); }
+.rank-name{ overflow-wrap:anywhere; font-size:14.5px; }
+.rank-bar{ height:6px; background:var(--bar); border-radius:3px; margin-top:5px; overflow:hidden; }
+.rank-bar i{ display:block; height:100%; background:var(--accent); border-radius:3px; }
+.rank-item.top .rank-bar i{ background:var(--gold); }
+.rank-pts{ text-align:right; font-variant-numeric:tabular-nums; color:var(--sub); font-size:12.5px; }
+.hidden{ display:none; }
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+@media (max-width:380px){ .opts{ grid-template-columns:1fr; } .opt{ min-height:70px; padding:16px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ⓪ home -->
+  <section id="home">
+    <p class="eyebrow">Prototype v2</p>
+    <h1>えらびメーター</h1>
+    <p class="tagline">たくさんの候補を、少ない比較で順位づけする。</p>
+    <button class="primary" id="newBtn" style="width:100%">新しいランキングをつくる</button>
+    <div id="resumeBox"></div>
+    <h2 style="margin-top:28px">これまでの結果</h2>
+    <p class="hint" id="histEmpty">まだ履歴がありません。結果はこの端末に自動保存されます。</p>
+    <ul class="hist" id="histList"></ul>
+  </section>
+
+  <!-- ① setup -->
+  <section id="setup" class="hidden">
+    <h2>候補を入れる</h2>
+    <div class="card">
+      <div class="field">
+        <label for="title">なにを決める?</label>
+        <input type="text" id="title" placeholder="例: 次の旅行先" value="次の旅行先">
+      </div>
+      <div class="field">
+        <label for="input">候補(1行に1つ・5〜30個くらいが快適)</label>
+        <textarea id="input">京都
+札幌
+沖縄
+金沢
+台北
+ソウル
+バンコク
+ハワイ
+シンガポール
+函館
+屋久島
+直島</textarea>
+      </div>
+      <p class="hint" style="margin-top:12px">出題は自動でミックスされます: 2〜4択から「いちばん良い」を選ぶ回と、「これは無いな」を外す回。</p>
+      <div class="row">
+        <button class="primary" id="startBtn">比較をはじめる</button>
+        <button class="ghost" id="backHome1">もどる</button>
+        <span class="hint" id="estimate"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② duel -->
+  <section id="duel" class="hidden">
+    <div class="progress"><i id="progFill" style="width:0%"></i></div>
+    <p class="q" id="roundLabel"></p>
+    <span class="mode-pill" id="modePill"></span>
+    <p class="q-main" id="qMain"></p>
+    <div class="opts" id="optsBox"></div>
+    <div class="skip">
+      <button class="ghost" id="skipBtn">この組はスキップ</button>
+      <button class="ghost" id="finishBtn">打ち切って結果を見る</button>
+      <button class="ghost" id="pauseBtn">中断(あとで再開)</button>
+    </div>
+  </section>
+
+  <!-- ③ results -->
+  <section id="result" class="hidden">
+    <h2 id="resultTitle">順位が出ました</h2>
+    <p class="hint" id="resultMeta"></p>
+    <ol class="rank-list" id="rankList"></ol>
+    <div class="row">
+      <button class="primary" id="againBtn">同じ候補でもう一度</button>
+      <button class="ghost" id="backHome2">ホームへ</button>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const show = id => { for (const s of ['home','setup','duel','result']) $(s).classList.toggle('hidden', s!==id); };
+const LS_HIST = 'erabi_hist_v1', LS_CUR = 'erabi_cur_v1';
+const load = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
+const save = (k,v) => localStorage.setItem(k, JSON.stringify(v));
+
+let S = null; // {title, items:[{name,r,g}], round, total}
+
+/* ---- Eloレーティング ----
+   全員1500から開始。勝者は同時に見せた相手全員に「勝った」として更新。
+   「無いな」を外す回は、選ばれた候補が他全員に「負けた」として更新。
+   序盤は大きく動き(K=40)、対戦を重ねるほど安定する。 */
+const K = g => Math.max(16, 40 - 2*g);
+function beat(w, l){
+  const e = 1 / (1 + 10 ** ((l.r - w.r) / 400));
+  const kw = K(w.g), kl = K(l.g);
+  w.r += kw * (1 - e);
+  l.r -= kl * (1 - e);
+}
+
+const parseInput = () => [...new Set($('input').value.split('\n').map(s=>s.trim()).filter(Boolean))];
+const roundsFor = n => Math.max(6, Math.ceil(n * 1.6));
+
+$('input').addEventListener('input', updateEstimate);
+function updateEstimate(){
+  const n = parseInput().length;
+  $('estimate').textContent = n >= 2 ? `候補 ${n} 件 → 約 ${roundsFor(n)} 問` : '';
+}
+
+$('newBtn').onclick = () => { show('setup'); updateEstimate(); };
+$('backHome1').onclick = () => renderHome();
+$('backHome2').onclick = () => renderHome();
+
+$('startBtn').onclick = () => {
+  const names = parseInput();
+  if (names.length < 2) { alert('候補を2つ以上入れてください'); return; }
+  S = { title: $('title').value.trim() || '無題のランキング',
+        items: names.map(name => ({ name, r: 1500, g: 0 })),
+        round: 0, total: roundsFor(names.length) };
+  show('duel'); nextRound();
+};
+
+/* 出題: 出場回数が少ない候補を軸に、レートが近い相手を集める(Swiss式)。
+   択数は2〜4を自動で揺らし、3択以上のとき30%で「無いな」形式。 */
+let current = [], mode = 'best';
+function pickRound(){
+  const n = S.items.length;
+  const size = Math.min(n, [2,3,3,4][Math.floor(Math.random()*4)]);
+  mode = (size >= 3 && Math.random() < 0.3) ? 'worst' : 'best';
+  const pool = [...S.items].sort((a,b) => a.g - b.g || Math.random() - .5);
+  const anchor = pool[0];
+  const rest = pool.slice(1).sort((a,b) =>
+    Math.abs(a.r - anchor.r) - Math.abs(b.r - anchor.r) || Math.random() - .5);
+  current = [anchor, ...rest.slice(0, size - 1)].sort(() => Math.random() - .5);
+}
+
+function nextRound(){
+  if (S.round >= S.total) { finish(); return; }
+  S.round++;
+  saveProgress();
+  $('roundLabel').textContent = `${S.round} / ${S.total} 問 — ${S.title}`;
+  $('progFill').style.width = ((S.round-1)/S.total*100) + '%';
+  pickRound();
+  const worst = mode === 'worst';
+  $('modePill').textContent = worst ? 'はずす' : 'えらぶ';
+  $('modePill').className = 'mode-pill' + (worst ? ' worst' : '');
+  $('qMain').textContent = worst ? 'この中で「これは無いな」と思うのは?' : 'いま選ぶなら、どれ?';
+  $('qMain').className = 'q-main' + (worst ? ' worst' : '');
+  $('duel').classList.toggle('duel-worst', worst);
+  const box = $('optsBox');
+  box.innerHTML = '';
+  current.forEach(it => {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    b.innerHTML = '<span class="opt-label"></span>';
+    b.querySelector('.opt-label').textContent = it.name;
+    b.onclick = () => {
+      const others = current.filter(c => c !== it);
+      if (mode === 'best') others.forEach(o => beat(it, o));
+      else others.forEach(o => beat(o, it));
+      current.forEach(c => c.g++);
+      nextRound();
+    };
+    box.appendChild(b);
+  });
+}
+$('skipBtn').onclick = () => nextRound();
+$('finishBtn').onclick = finish;
+$('pauseBtn').onclick = () => { saveProgress(); renderHome(); };
+
+function saveProgress(){ save(LS_CUR, S); }
+
+function finish(){
+  localStorage.removeItem(LS_CUR);
+  const rec = { id: Date.now(), title: S.title, date: new Date().toISOString().slice(0,10),
+    rounds: S.round, items: S.items.map(i => ({ name: i.name, r: Math.round(i.r), g: i.g })) };
+  const hist = load(LS_HIST) || [];
+  hist.unshift(rec);
+  save(LS_HIST, hist.slice(0, 50));
+  renderResult(rec, true);
+}
+
+function renderResult(rec, fresh){
+  $('resultTitle').textContent = rec.title;
+  $('resultMeta').textContent = `${rec.date} · ${rec.rounds} 問 · Eloレーティング(1500基準)`;
+  const ranked = [...rec.items].sort((a,b) => b.r - a.r);
+  const max = ranked[0].r, min = ranked[ranked.length-1].r, span = Math.max(1, max - min);
+  const list = $('rankList');
+  list.innerHTML = '';
+  ranked.forEach((it, i) => {
+    const li = document.createElement('li');
+    li.className = 'rank-item' + (i === 0 ? ' top' : '');
+    li.innerHTML = `<div class="rank-no">${i+1}</div>
+      <div><div class="rank-name"></div><div class="rank-bar"><i style="width:${10 + (it.r-min)/span*90}%"></i></div></div>
+      <div class="rank-pts">${it.r}</div>`;
+    li.querySelector('.rank-name').textContent = it.name;
+    list.appendChild(li);
+  });
+  $('againBtn').classList.toggle('hidden', !fresh);
+  lastRec = rec;
+  show('result');
+}
+let lastRec = null;
+$('againBtn').onclick = () => {
+  S = { title: lastRec.title, items: lastRec.items.map(i => ({ name: i.name, r: 1500, g: 0 })),
+        round: 0, total: roundsFor(lastRec.items.length) };
+  show('duel'); nextRound();
+};
+
+function renderHome(){
+  const cur = load(LS_CUR);
+  $('resumeBox').innerHTML = '';
+  if (cur){
+    const li = document.createElement('div');
+    li.className = 'card resume'; li.style.marginTop = '12px'; li.style.cursor = 'pointer';
+    li.innerHTML = `<span class="badge gold">中断中</span> <b></b> <span class="hint">— ${cur.round}/${cur.total} 問まで回答済み。タップで再開</span>`;
+    li.querySelector('b').textContent = cur.title;
+    li.onclick = () => { S = cur; show('duel'); S.round--; nextRound(); };
+    $('resumeBox').appendChild(li);
+  }
+  const hist = load(LS_HIST) || [];
+  $('histEmpty').classList.toggle('hidden', hist.length > 0);
+  const ul = $('histList');
+  ul.innerHTML = '';
+  hist.forEach(rec => {
+    const top = [...rec.items].sort((a,b) => b.r - a.r)[0];
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="meta"><div class="t"></div>
+      <div class="s">${rec.date} · ${rec.items.length} 候補 · 1位: <b></b></div></div>
+      <span class="badge">結果</span><button class="del" aria-label="削除">✕</button>`;
+    li.querySelector('.t').textContent = rec.title;
+    li.querySelector('.s b').textContent = top.name;
+    li.onclick = () => renderResult(rec, false);
+    li.querySelector('.del').onclick = e => {
+      e.stopPropagation();
+      save(LS_HIST, (load(LS_HIST)||[]).filter(r => r.id !== rec.id));
+      renderHome();
+    };
+    ul.appendChild(li);
+  });
+  show('home');
+}
+renderHome();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => {
+      console.warn('Service worker registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>
