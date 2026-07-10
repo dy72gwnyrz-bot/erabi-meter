@@ -134,14 +134,20 @@ button:disabled{ opacity:.4; cursor:not-allowed; }
     <p class="tagline">たくさんの候補を、少ない比較で順位づけする。</p>
     <button class="primary" id="newBtn" style="width:100%">新しいランキングをつくる</button>
     <div id="resumeBox"></div>
-    <h2 style="margin-top:28px">これまでの結果</h2>
+    <div class="row" style="margin-top:28px; justify-content:space-between">
+      <h2 style="margin:0">これまでの結果</h2>
+      <button class="ghost hidden" id="histClearBtn" type="button">全削除</button>
+    </div>
     <p class="hint" id="histEmpty">まだ履歴がありません。結果はこの端末に自動保存されます。</p>
     <ul class="hist" id="histList"></ul>
   </section>
 
   <!-- ① setup -->
   <section id="setup" class="hidden">
-    <h2>候補を入れる</h2>
+    <div class="row" style="margin:0 0 10px; justify-content:space-between">
+      <h2 style="margin:0">候補を入れる</h2>
+      <button class="ghost" id="backHomeTop" type="button">← ホームへ</button>
+    </div>
     <div class="card">
       <div class="field">
         <label for="title">なにを決める?</label>
@@ -330,6 +336,7 @@ function updateEstimate(){
 
 $('newBtn').onclick = () => { show('setup'); updateEstimate(); };
 $('backHome1').onclick = () => renderHome();
+$('backHomeTop').onclick = () => renderHome();
 $('backHome2').onclick = () => renderHome();
 
 $('startBtn').onclick = () => {
@@ -503,6 +510,7 @@ function renderHome(){
   }
   const hist = load(LS_HIST) || [];
   $('histEmpty').classList.toggle('hidden', hist.length > 0);
+  $('histClearBtn').classList.toggle('hidden', hist.length === 0);
   const ul = $('histList');
   ul.innerHTML = '';
   hist.forEach(rec => {
@@ -523,6 +531,11 @@ function renderHome(){
   });
   show('home');
 }
+$('histClearBtn').onclick = () => {
+  if (!confirm('これまでの結果をすべて削除します。よろしいですか?')) return;
+  localStorage.removeItem(LS_HIST);
+  renderHome();
+};
 renderHome();
 
 if ('serviceWorker' in navigator) {
