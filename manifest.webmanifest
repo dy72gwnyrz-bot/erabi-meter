@@ -1,7 +1,7 @@
 {
-  "name": "えらびメーター",
-  "short_name": "えらび",
-  "description": "たくさんの候補を、少ない比較で順位づけする。",
+  "name": "どれどれ",
+  "short_name": "どれどれ",
+  "description": "迷ったら、くらべてみよう。候補をくらべて好きな順を見つけます。",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

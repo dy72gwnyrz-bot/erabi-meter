@@ -1,5 +1,5 @@
-// えらびメーター service worker — navigation is network-first, other assets are cache-first.
-const CACHE_VERSION = 'erabi-meter-v3';
+// どれどれ service worker — navigation is network-first, other assets are cache-first.
+const CACHE_VERSION = 'erabi-meter-v9';
 const PRECACHE_URLS = [
   './',
   './index.html',
